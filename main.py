@@ -1,73 +1,50 @@
-import time, uuid
-from typing import Optional
-from fastapi import FastAPI, Request, Query
+import jwt, time, uuid
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
-ALLOWED_ORIGIN = "https://dash-3xmboh.example.com"
+ISS = "https://idp.exam.local"
+AUD = "tds-rjwm4q39.apps.exam.local"
 EMAIL = "24f3003515@ds.study.iitm.ac.in"
+
+PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuYcxiP/hG8C6Sb9iwg3yiLAA4HCnpITcbWCSelbvbYGuc3EbNy4xFyf5Cbj5DHJMIDEkryOgyd2giIIIBOUBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNldu6A9cNteNpXcWyJjG2axVfmq7i6SuKr1JoWYG7xTTAvKPujSl4OtsQfO3h5NepzdfXpr28oNnzfWed+zclR6BcmNNo/WVfJ4xyCLSf0BCOgdTgW6PdaChd1l9VDetJZVEgC5tkyvXsfISI6iyrYbKR0NEBSqq4XkadEjsCs4F1RncsS4LlgniT7GlkL9Mce3b0wGLs9/7ZIXdQIDAQAB
+-----END PUBLIC KEY-----"""
 
 
 @app.middleware("http")
-async def headers_middleware(request: Request, call_next):
-    start = time.time()
+async def add_headers(request: Request, call_next):
     response = await call_next(request)
-    process_time = time.time() - start
     response.headers["X-Request-ID"] = str(uuid.uuid4())
-    response.headers["X-Process-Time"] = f"{process_time:.6f}"
-    origin = request.headers.get("origin")
-    if origin == ALLOWED_ORIGIN:
-        response.headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
     return response
 
 
-@app.options("/stats")
-async def stats_preflight(request: Request):
-    origin = request.headers.get("origin")
-    headers = {
-        "X-Request-ID": str(uuid.uuid4()),
-        "X-Process-Time": "0.000000",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-    }
-    if origin == ALLOWED_ORIGIN:
-        headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
-    return JSONResponse(content={"ok": True}, headers=headers, status_code=200)
+@app.post("/verify")
+async def verify(request: Request):
+    body = await request.json()
+    token = body.get("token", "")
 
+    try:
+        payload = jwt.decode(
+            token,
+            PUBLIC_KEY,
+            algorithms=["RS256"],
+            issuer=ISS,
+            audience=AUD,
+        )
+    except jwt.ExpiredSignatureError:
+        return JSONResponse(content={"valid": False}, status_code=401)
+    except jwt.InvalidAudienceError:
+        return JSONResponse(content={"valid": False}, status_code=401)
+    except jwt.InvalidIssuerError:
+        return JSONResponse(content={"valid": False}, status_code=401)
+    except Exception:
+        return JSONResponse(content={"valid": False}, status_code=401)
 
-@app.get("/stats")
-async def stats(request: Request, values: Optional[str] = Query(None)):
-    start = time.time()
-    nums = []
-    if values:
-        for part in values.split(","):
-            part = part.strip()
-            if part:
-                nums.append(int(part))
-
-    count = len(nums)
-    total = sum(nums)
-    mn = min(nums) if nums else 0
-    mx = max(nums) if nums else 0
-    mean = (total / count) if count else 0
-
-    process_time = time.time() - start
-    body = {
-        "email": EMAIL,
-        "count": count,
-        "sum": total,
-        "min": mn,
-        "max": mx,
-        "mean": round(mean, 6),
-    }
-
-    headers = {
-        "X-Request-ID": str(uuid.uuid4()),
-        "X-Process-Time": f"{process_time:.6f}",
-    }
-    origin = request.headers.get("origin")
-    if origin == ALLOWED_ORIGIN:
-        headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN
-
-    return JSONResponse(content=body, headers=headers)
+    return JSONResponse(content={
+        "valid": True,
+        "email": payload.get("email", EMAIL),
+        "sub": payload.get("sub", ""),
+        "aud": payload.get("aud", ""),
+    }, headers={"X-Request-ID": str(uuid.uuid4())})
