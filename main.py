@@ -1,4 +1,4 @@
-import jwt, time, uuid
+import jwt, uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -13,26 +13,17 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuYcxiP/hG8C6Sb9iwg
 -----END PUBLIC KEY-----"""
 
 
-@app.middleware("http")
-async def add_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
-    return response
+@app.get("/")
+async def root():
+    return {"status": "ok"}
 
 
 @app.post("/verify")
 async def verify(request: Request):
     body = await request.json()
     token = body.get("token", "")
-
     try:
-        payload = jwt.decode(
-            token,
-            PUBLIC_KEY,
-            algorithms=["RS256"],
-            issuer=ISS,
-            audience=AUD,
-        )
+        payload = jwt.decode(token, PUBLIC_KEY, algorithms=["RS256"], issuer=ISS, audience=AUD)
     except jwt.ExpiredSignatureError:
         return JSONResponse(content={"valid": False}, status_code=401)
     except jwt.InvalidAudienceError:
